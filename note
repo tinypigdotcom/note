@@ -1,0 +1,320 @@
+#!/usr/bin/perl
+# purpose: quickly store and retrieve small pieces of information
+
+#    Copyright (C) 2016  David M. Bradford
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your u_option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see https://www.gnu.org/licenses/gpl.txt
+#
+#    The author, David M. Bradford, can be contacted at:
+#    davembradford@gmail.com
+
+# TODO
+
+# MAYBE TODO
+# * implement tags
+# * implement delete entry
+# * implement edit individual entry
+# * allow input from file
+
+# DONE
+# * implement "library" like notebook in evernote (sort of)
+# * Implement word option
+# * allow for title search
+
+use strict;
+use warnings FATAL => 'all';
+
+BEGIN { $| = 1 }
+
+use File::Basename;
+use Getopt::Long;
+
+our $VERSION = '0.10.0';
+
+my $PROG = basename($0);
+my $ERR_EXIT = 2;
+
+sub usage_top {
+    warn "Usage: $PROG [OPTION]... PATTERN..\n";
+}
+
+sub short_usage {
+    usage_top();
+    warn "Try '$PROG --help' for more information.\n";
+}
+
+sub errout {
+    my $message = join( ' ', @_ );
+    warn "$PROG: $message\n";
+    short_usage();
+    exit $ERR_EXIT;
+}
+
+sub usage {
+    usage_top();
+    warn <<EOF;
+quickly store and retrieve small pieces of information
+Example: $PROG -w lawnmower
+
+  -h, --help            display this help text and exit
+  -v, --version         display version information and exit
+  -f, --file=FILE       Search a specific file
+  -l, --library=LIBRARY Search a specific library
+  -a, --add             add a note
+  -e, --edit            edit the notes file
+  -t, --title           search title only
+  -V, --Verbose         show additional information about entries matched / not
+                        matched
+  -w, --word            only find if PATTERN is a word
+
+EOF
+    return;
+}
+
+sub do_short_usage {
+    short_usage();
+    exit $ERR_EXIT;
+}
+
+sub version {
+    warn "$PROG $VERSION\n";
+    return;
+}
+
+my $h                = 0;
+my $help             = 0;
+my $version          = 0;
+my $file             = '';
+my $library          = '';
+my $add              = 0;
+my $edit             = 0;
+my $title            = 0;
+my $Verbose          = 0;
+my $word             = 0;
+
+Getopt::Long::Configure ("bundling");
+
+my %options = (
+    "help"           => \$help,
+    "version"        => \$version,
+    "file=s"         => \$file,
+    "library=s"      => \$library,
+    "add"            => \$add,
+    "edit"           => \$edit,
+    "title"          => \$title,
+    "Verbose"        => \$Verbose,
+    "word"           => \$word,
+
+);
+
+# Explicitly add single letter version of each option to allow bundling
+my ($key, $value);
+my %temp = %options;
+while (($key,$value) = each %temp) {
+    my $letter = $key;
+    $letter =~ s/(\w)\w*/$1/;
+    $options{$letter} = $value;
+}
+# Fix-ups from previous routine
+$options{h} = \$h;
+
+GetOptions(%options) or errout("Error in command line arguments");
+
+if    ($help)     { usage(); exit    }
+elsif ($h)        { do_short_usage() }
+elsif ($version)  { version(); exit  }
+
+
+use strict;
+use warnings FATAL => 'all';
+
+use Clipboard;
+use Data::Dumper;
+use File::Basename;
+use Getopt::Long;
+use IO::File;
+
+my $nf = $ENV{NOTEFILES} || "$ENV{HOME}/.notes";
+my @notefiles = split ':', $nf;
+
+sub which_notefile {
+    my $pattern = shift || '';
+
+    # No pattern specified, use default
+    if ( !$pattern ) {
+        return @notefiles;
+    }
+    my @found_notefiles = grep { /$pattern/i } @notefiles;
+    if ( @found_notefiles > 1 ) {
+        die qq{Ambiguous file specification "$pattern"};
+    }
+    elsif ( @found_notefiles < 1 ) {
+        die qq{No file found for pattern "$pattern"};
+    }
+    else {
+        return $found_notefiles[0];
+    }
+}
+
+my $threshold = 10;
+
+my $separator = "%%%\n";
+
+@notefiles = which_notefile($file);
+
+sub edit_notes {
+    my $editor = $ENV{EDITOR} || 'vim';
+    my $paths = join( ' ', @notefiles );
+    system("$editor $paths");
+}
+
+my @output_lines;
+
+sub output {
+    my $output_line = join( '', @_ );
+    push @output_lines, $output_line;
+}
+
+sub search_note {
+    my (@patterns) = @_;
+
+    if ($word) {
+        for (@patterns) {
+            $_ = "\\b$_\\b";
+        }
+    }
+
+    if ($title) {
+        for (@patterns) {
+            $_ = "^[^\\x0a\\x0d]*$_";
+        }
+    }
+
+    my @notes;
+    for my $file (@notefiles) {
+        my $ifh = IO::File->new( $file, '<' );
+        die "Can't open $file: $!" if !defined $ifh;
+
+        my $contents = do { local $/; <$ifh> };
+
+        $ifh->close;
+        push @notes, split( /^$separator/m, $contents );
+    }
+
+    my %matches;
+    my %excluded;
+    my $total_excluded = 0;
+  OUTER: for (@notes) {
+        for my $pattern (@patterns) {
+            next OUTER unless /$pattern/i;
+        }
+        if (/^[^\x0a\x0d]*library:(\S*)/) {
+            my $note_lib = $1;
+            if ( $library ne $note_lib ) {
+                $excluded{$note_lib}++;
+                $total_excluded++;
+                next OUTER;
+            }
+        }
+        else {
+            if ($library) {
+                $excluded{no_library}++;
+                $total_excluded++;
+                next OUTER;
+            }
+        }
+        s/^/  /mg;
+        $matches{$_}++;
+    }
+    my $output_separator = "\n" . '+' . '=' x 78 . "\n|";
+    my $title_separator  = "\n" . '+' . '-' x 68 . "\n";
+    if (%matches) {
+        my $total_matches = scalar keys %matches;
+        if ( $total_matches > $threshold ) {
+            print "Found $total_matches matches. Continue (Y/n) ? ";
+            my $junk = <STDIN>;
+            chomp $junk;
+            if ( $junk =~ /n/i ) {
+                exit;
+            }
+        }
+        my $content;
+        for my $match ( keys %matches ) {
+            my @lines = split "\n", $match;
+            my $title = shift @lines;
+            $title =~ s/^\s*//;
+            my $body = join "\n", @lines;
+            $body =~ s/\s*$//s;
+            output $output_separator, " $title", $title_separator;
+            $content = '';
+            if ( $body =~ s/[[]<(.*)>[]]/$1/sg ) {
+                $content = $1;
+            }
+            output $body, "\n";
+            Clipboard->copy($content || $body);
+        }
+        output "\n";
+    }
+    else {
+        output "No match.\n";
+    }
+    if ( $Verbose && $total_excluded ) {
+        my $entries = $total_excluded == 1 ? 'entry' : 'entries';
+        my $were    = $total_excluded == 1 ? 'was'   : 'were';
+        output "($total_excluded $entries $were excluded in other libraries- ";
+        for ( keys %excluded ) {
+            output "$_:$excluded{$_} ";
+        }
+        output ")\n";
+    }
+    my $pager = $ENV{PAGER} || 'less -FX';
+    open O, "| $pager" or die;
+    print O @output_lines;
+    close O;
+
+    return;
+}
+
+sub add_note {
+    my $note;
+    while ( my $input_line = <STDIN> ) {
+        $note .= $input_line;
+    }
+
+    my $ofh = IO::File->new( $notefiles[0], '>>' );
+    die "Can't open $notefiles[0]: $!" if !defined $ofh;
+
+    print $ofh "${separator}${note}\n";
+    $ofh->close;
+    warn "*** 1 note added to $notefiles[0]\n";
+
+    return;
+}
+
+sub main {
+    my (@patterns) = @_;
+
+    if    ($add)      { return add_note() }
+    elsif ($edit)     { return edit_notes() }
+    elsif (@patterns) { return search_note(@patterns) }
+    else              { return do_short_usage() }
+
+    die "Boom.";    # This code should never be reached
+    return;
+}
+
+my $rc = ( main(@ARGV) || 0 );
+
+exit $rc;
+

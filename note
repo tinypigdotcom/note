@@ -37,10 +37,15 @@ use warnings FATAL => 'all';
 
 BEGIN { $| = 1 }
 
+use Clipboard;
+use Data::Dumper;
+use File::Basename;
 use File::Basename;
 use Getopt::Long;
+use Getopt::Long;
+use IO::File;
 
-our $VERSION = '0.10.0';
+our $VERSION = '0.10.1';
 
 my $PROG = basename($0);
 my $ERR_EXIT = 2;
@@ -134,16 +139,6 @@ GetOptions(%options) or errout("Error in command line arguments");
 if    ($help)     { usage(); exit    }
 elsif ($h)        { do_short_usage() }
 elsif ($version)  { version(); exit  }
-
-
-use strict;
-use warnings FATAL => 'all';
-
-use Clipboard;
-use Data::Dumper;
-use File::Basename;
-use Getopt::Long;
-use IO::File;
 
 my $nf = $ENV{NOTEFILES} || "$ENV{HOME}/.notes";
 my @notefiles = split ':', $nf;

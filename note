@@ -155,6 +155,9 @@ sub which_notefile {
     if ( !$pattern ) {
         return @notefiles;
     }
+    if ( -r $pattern ) {
+        return $pattern;
+    }
     my @found_notefiles = grep { /$pattern/i } @notefiles;
     if ( @found_notefiles > 1 ) {
         die qq{Ambiguous file specification "$pattern"};

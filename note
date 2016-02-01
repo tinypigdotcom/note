@@ -155,6 +155,7 @@ sub main {
         title        => $title,
         Verbose      => $Verbose,
         word         => $word,
+        autoprint    => 1,
     );
     if    ($add)      { return $app_note->add_note() }
     elsif ($edit)     { return $app_note->edit_notes() }

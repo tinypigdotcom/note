@@ -1,0 +1,6 @@
+Revision history for Perl extension App::Notes.
+
+0.01  Sun Jan 31 13:30:22 2016
+	- original version; created by h2xs 1.23 with options
+		-AX App::Notes
+
